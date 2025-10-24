@@ -1,0 +1,8 @@
+{
+  "name": "Copy of Eryon AI Assistant",
+  "description": "An advanced AI assistant for A&G Tech, offering multi-modal capabilities including chat, image/video generation, search grounding, audio processing, and complex reasoning.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
