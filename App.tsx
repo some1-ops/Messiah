@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Message, MessageAuthor, AiMode, AspectRatio } from './types';
-import { MODES, ERYON_SYSTEM_PROMPT, VEO_LOADING_MESSAGES } from './constants';
+import { MODES, ERYON_SYSTEM_PROMPT, VEO_LOADING_MESSAGES, AG_TECH_LOGO_BASE64 } from './constants';
 import * as geminiService from './services/geminiService';
 import { fileToBase64 } from './services/utils';
 import { useLiveConversation } from './hooks/useLiveConversation';
@@ -12,7 +13,7 @@ import LoadingSpinner from './components/LoadingSpinner';
 
 const App: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([
-        { id: '1', author: MessageAuthor.ERYON, text: "I am Eryon, an AI assistant for A&G Tech. How can I help you today? You can ask me about our services, or try one of the modes below." }
+        { id: '1', author: MessageAuthor.ERYON, text: "I am Eryon, the official AI representative of A&G Tech. How can I help you understand how automation can transform your business today?" }
     ]);
     const [input, setInput] = useState('');
     const [currentMode, setCurrentMode] = useState<AiMode>(AiMode.CHAT);
@@ -60,15 +61,15 @@ const App: React.FC = () => {
         setIsLoading(true);
 
         const loadingMessageId = Date.now().toString();
-        // FIX: The `addMessage` function creates its own ID. To add a message with a specific ID
-        // (so we can update it later), we call `setMessages` directly. This fixes an error where
-        // an `id` was incorrectly passed to `addMessage`.
         setMessages(prev => [...prev, { id: loadingMessageId, author: MessageAuthor.ERYON, isLoading: true }]);
 
         try {
             let response: Partial<Message> = {};
 
             const fileData = uploadedFile ? await fileToBase64(uploadedFile) : null;
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
             setUploadedFile(null);
 
             if (currentMode === AiMode.CHAT) {
@@ -93,10 +94,12 @@ const App: React.FC = () => {
                  let userLocation: GeolocationCoordinates | undefined;
                  if(isMaps) {
                     try {
-                        const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject));
+                        const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 }));
                         userLocation = position.coords;
                     } catch (e) {
-                        console.warn("Could not get user location");
+                        console.warn("Could not get user location:", e);
+                        // Re-throw to be caught by the main error handler
+                        throw e;
                     }
                  }
                 const textResponse = await geminiService.generateText(userMessageText, currentMode, userLocation);
@@ -108,11 +111,40 @@ const App: React.FC = () => {
 
         } catch (error: any) {
             console.error("API Error:", error);
-            let errorMessage = "Sorry, I encountered an error.";
-            if (error.message && error.message.includes("Requested entity was not found")) {
-                errorMessage = "API Key error. Please re-select your API key for video generation.";
-                setIsApiKeySelected(false);
+            let errorMessage = "An unexpected error occurred. Please try again later.";
+
+            if (error.code && typeof error.code === 'number') { // GeolocationPositionError
+                switch (error.code) {
+                    case 1: // PERMISSION_DENIED
+                        errorMessage = "Location permission denied. Please enable location services in your browser settings to use Maps Search.";
+                        break;
+                    case 2: // POSITION_UNAVAILABLE
+                        errorMessage = "Your location could not be determined. Please check your network or try again.";
+                        break;
+                    case 3: // TIMEOUT
+                        errorMessage = "The request to get your location timed out. Please try again.";
+                        break;
+                }
+            } else if (error.message) {
+                const msg = error.message.toLowerCase();
+                 if (msg.includes("requested entity was not found")) {
+                    errorMessage = "API Key error. The selected key may not have access to the Video API. Please re-select your API key.";
+                    setIsApiKeySelected(false);
+                } else if (msg.includes("api key not valid")) {
+                    errorMessage = "Your API Key is not valid. Please check your configuration.";
+                } else if (msg.includes("quota") || msg.includes("resource has been exhausted")) {
+                    errorMessage = "You have exceeded your API quota. Please check your billing account or try again later.";
+                } else if (msg.includes("safety policy")) {
+                    errorMessage = "The request was blocked due to the safety policy. Please modify your prompt and try again.";
+                } else if (msg.includes("failed to fetch") || msg.includes("network")) {
+                    errorMessage = "A network error occurred. Please check your internet connection and try again.";
+                } else if (msg.includes("400")) {
+                    errorMessage = "There was a problem with your request (Bad Request). Please check your input and try again.";
+                } else if (msg.includes("500") || msg.includes("internal error")) {
+                    errorMessage = "The AI server encountered an internal error. Please try again in a few moments.";
+                }
             }
+
             setMessages(prev => prev.map(m => m.id === loadingMessageId ? { ...m, text: errorMessage, isLoading: false } : m));
         } finally {
             setIsLoading(false);
@@ -146,7 +178,7 @@ const App: React.FC = () => {
                     <div className="flex items-center gap-2">
                         <span className="text-sm text-gray-400">Aspect Ratio:</span>
                         {(isVideo ? ["16:9", "9:16"] : ["1:1", "16:9", "9:16", "4:3", "3:4"]).map((ratio) => (
-                            <button key={ratio} onClick={() => setAspectRatio(ratio as AspectRatio)} className={`px-2 py-1 text-xs rounded ${aspectRatio === ratio ? 'bg-blue-600' : 'bg-gray-600'}`}>
+                            <button key={ratio} onClick={() => setAspectRatio(ratio as AspectRatio)} className={`px-2 py-1 text-xs rounded-md transition-all ${aspectRatio === ratio ? 'bg-gradient-to-r from-[#9B59B6] to-[#00FFD1] text-black font-semibold shadow-lg' : 'bg-[#1F2937] text-gray-300 hover:bg-[#374151]'}`}>
                                 {ratio}
                             </button>
                         ))}
@@ -160,70 +192,72 @@ const App: React.FC = () => {
     const showApiKeySelector = (currentMode === AiMode.GENERATE_VIDEO || currentMode === AiMode.ANIMATE_IMAGE) && !isApiKeySelected;
 
     return (
-        <div className="h-screen w-screen bg-gray-900 flex flex-col font-sans">
+        <div className="h-screen w-screen bg-[#0A1628] flex flex-col font-sans text-white">
             {/* Header */}
-            <header className="flex-shrink-0 bg-gray-900/80 backdrop-blur-sm border-b border-gray-700 p-4 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                         <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3.5a1 1 0 00.02 1.84l7 3.5a1 1 0 00.748 0l7-3.5a1 1 0 00.02-1.84l-7-3.5zM3 9.363l7 3.5 7-3.5v3.824l-7 3.5-7-3.5V9.363z" />
-                    </svg>
+            <header className="flex-shrink-0 bg-[#0A1628]/80 backdrop-blur-sm border-b border-[#9B59B6]/30 p-4 flex justify-between items-center shadow-lg shadow-[#9B59B6]/10">
+                <div className="flex items-center gap-4">
+                    <img src={AG_TECH_LOGO_BASE64} alt="A&G Tech Logo" className="h-10 w-10 object-contain" />
                     <div>
-                        <h1 className="text-xl font-bold text-white">Eryon</h1>
-                        <p className="text-xs text-gray-400">AI Assistant for A&G Tech</p>
+                        <h1 className="text-xl font-bold text-white tracking-wider">A&G Tech</h1>
+                        <p className="text-xs text-gray-400 tracking-wide uppercase">ERYON AI ASSISTANT</p>
                     </div>
                 </div>
             </header>
 
             <main className="flex-1 flex flex-col min-h-0">
-                <div className="flex-shrink-0 overflow-x-auto p-2">
+                <div className="flex-shrink-0 overflow-x-auto p-3">
                      <div className="flex gap-2 justify-center">
                         {MODES.filter(m => m !== AiMode.LIVE_CONVERSATION).map(mode => (
-                           <button key={mode} onClick={() => handleModeChange(mode)} className={`px-4 py-2 text-sm rounded-full whitespace-nowrap transition-colors ${currentMode === mode ? 'bg-blue-600 text-white font-semibold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+                           <button key={mode} onClick={() => handleModeChange(mode)} 
+                           className={`px-4 py-2 text-sm rounded-full whitespace-nowrap transition-all duration-300 transform hover:scale-105 ${currentMode === mode ? 'bg-gradient-to-r from-[#9B59B6] to-[#00FFD1] text-black font-bold shadow-lg shadow-[#00FFD1]/20' : 'bg-[#1F2937] text-gray-300 hover:bg-[#374151]'}`}>
                                {mode}
                            </button>
                         ))}
-                     </div>
+                    </div>
                 </div>
+
                 <ChatWindow messages={messages} liveTranscripts={transcripts} currentInterimTranscript={currentInterimTranscript} />
-            </main>
+
+                <footer className="flex-shrink-0 bg-[#0A1628]/80 backdrop-blur-sm border-t border-[#9B59B6]/30 p-4 space-y-3">
+                    {showApiKeySelector && <ApiKeySelector onKeySelected={() => setIsApiKeySelected(true)} />}
             
-            {/* Input Area */}
-            <footer className="flex-shrink-0 p-4 bg-gray-900 border-t border-gray-700">
-                {showApiKeySelector && <ApiKeySelector onKeySelected={() => setIsApiKeySelected(true)} />}
-                <div className="max-w-4xl mx-auto">
-                    <div className="flex items-center bg-gray-800 rounded-xl p-2">
-                        <button onClick={handleToggleLive} className={`p-2 rounded-full transition-colors mr-2 ${isLive || isConnecting ? 'bg-red-500' : 'bg-gray-600 hover:bg-gray-500'}`}>
-                          {isConnecting ? <LoadingSpinner /> : (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                            </svg>
-                          )}
+                    <div className="flex items-center gap-3 bg-[#1F2937] rounded-full p-2 shadow-inner shadow-black/30">
+                        <button onClick={handleToggleLive} className={`p-3 rounded-full transition-all duration-300 ${isLive || isConnecting ? 'bg-red-500 animate-pulse' : 'bg-green-500 hover:bg-green-600'}`} aria-label={isLive || isConnecting ? "Stop live conversation" : "Start live conversation"}>
+                            { isConnecting ? <LoadingSpinner /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                            </svg>}
                         </button>
-                        <input type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSend()} placeholder={isLive ? "Live conversation is active..." : `Message Eryon in ${currentMode} mode...`} disabled={isLoading || isLive || isConnecting} className="w-full bg-transparent focus:outline-none text-white px-2" />
-                        
-                        <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*" />
+            
                         {needsFileUpload && (
-                            <button onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-white" title="Upload File">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                </svg>
+                            <button onClick={() => fileInputRef.current?.click()} className="p-3 bg-[#374151] rounded-full hover:bg-[#4b5563] transition-colors" aria-label="Upload file">
+                                <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*" />
+                                { uploadedFile ? 
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    :
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                                }
                             </button>
                         )}
-
-                        <button onClick={handleSend} disabled={isLoading || isLive || showApiKeySelector} className="bg-blue-600 text-white rounded-lg p-2 ml-2 disabled:bg-gray-600 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors">
-                            {isLoading ? <LoadingSpinner /> : 
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                                </svg>
-                            }
+                        
+                        <input 
+                            type="text" 
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                            placeholder={isLive ? "Live conversation is active..." : (uploadedFile ? `${uploadedFile.name} is ready.` : `Message Eryon in ${currentMode} mode...`)}
+                            className="flex-1 bg-transparent focus:outline-none px-2 placeholder-gray-500 disabled:cursor-not-allowed"
+                            disabled={isLoading || isLive || isConnecting}
+                            aria-label="Chat input"
+                        />
+            
+                        <button onClick={handleSend} disabled={isLoading || isLive || isConnecting || (!input.trim() && !uploadedFile)} className="p-3 bg-gradient-to-r from-[#9B59B6] to-[#00FFD1] rounded-full hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Send message">
+                            {isLoading ? <LoadingSpinner /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>}
                         </button>
                     </div>
-                    {uploadedFile && <div className="text-xs text-gray-400 mt-2 text-center">File ready: {uploadedFile.name}</div>}
-                    <div className="mt-2 h-8 flex items-center justify-center">
-                        {renderInputAccessory()}
-                    </div>
-                </div>
-            </footer>
+                    
+                    {!showApiKeySelector && <div className="flex justify-center pt-2">{renderInputAccessory()}</div>}
+                </footer>
+            </main>
         </div>
     );
 };

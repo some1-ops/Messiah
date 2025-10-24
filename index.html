@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Eryon AI Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="importmap">
       {
@@ -15,8 +18,27 @@
         }
       }
     </script>
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      /* Custom scrollbar for a modern look */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0A1628; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #2a3a50; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #3a4a60; 
+      }
+    </style>
   </head>
-  <body class="bg-gray-900 text-white">
+  <body class="bg-[#0A1628] text-gray-200">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
